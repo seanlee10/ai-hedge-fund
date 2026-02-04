@@ -1,95 +1,44 @@
-import datetime
-import os
-import pandas as pd
-import requests
-import time
+"""
+Financial data API module.
 
-from src.data.cache import get_cache
+Uses Alpha Vantage for prices, financial metrics, line items, and news.
+Uses SEC EDGAR for insider trading data.
+"""
+
+import pandas as pd
+
 from src.data.models import (
     CompanyNews,
-    CompanyNewsResponse,
     FinancialMetrics,
-    FinancialMetricsResponse,
     Price,
-    PriceResponse,
     LineItem,
-    LineItemResponse,
     InsiderTrade,
-    InsiderTradeResponse,
-    CompanyFactsResponse,
 )
 
-# Global cache instance
-_cache = get_cache()
-
-
-def _make_api_request(url: str, headers: dict, method: str = "GET", json_data: dict = None, max_retries: int = 3) -> requests.Response:
-    """
-    Make an API request with rate limiting handling and moderate backoff.
-    
-    Args:
-        url: The URL to request
-        headers: Headers to include in the request
-        method: HTTP method (GET or POST)
-        json_data: JSON data for POST requests
-        max_retries: Maximum number of retries (default: 3)
-    
-    Returns:
-        requests.Response: The response object
-    
-    Raises:
-        Exception: If the request fails with a non-429 error
-    """
-    for attempt in range(max_retries + 1):  # +1 for initial attempt
-        if method.upper() == "POST":
-            response = requests.post(url, headers=headers, json=json_data)
-        else:
-            response = requests.get(url, headers=headers)
-        
-        if response.status_code == 429 and attempt < max_retries:
-            # Linear backoff: 60s, 90s, 120s, 150s...
-            delay = 60 + (30 * attempt)
-            print(f"Rate limited (429). Attempt {attempt + 1}/{max_retries + 1}. Waiting {delay}s before retrying...")
-            time.sleep(delay)
-            continue
-        
-        # Return the response (whether success, other errors, or final 429)
-        return response
+# Import from new provider modules
+from src.tools.alpha_vantage import (
+    get_prices_av,
+    get_financial_metrics_av,
+    search_line_items_av,
+    get_company_news_av,
+    get_market_cap_av,
+)
+from src.tools.sec_edgar import get_insider_trades_sec
 
 
 def get_prices(ticker: str, start_date: str, end_date: str, api_key: str = None) -> list[Price]:
-    """Fetch price data from cache or API."""
-    # Create a cache key that includes all parameters to ensure exact matches
-    cache_key = f"{ticker}_{start_date}_{end_date}"
-    
-    # Check cache first - simple exact match
-    if cached_data := _cache.get_prices(cache_key):
-        return [Price(**price) for price in cached_data]
+    """Fetch price data from Alpha Vantage.
 
-    # If not in cache, fetch from API
-    headers = {}
-    financial_api_key = api_key or os.environ.get("FINANCIAL_DATASETS_API_KEY")
-    if financial_api_key:
-        headers["X-API-KEY"] = financial_api_key
+    Args:
+        ticker: Stock ticker symbol
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        api_key: Optional API key (uses ALPHA_VANTAGE_API_KEY env var if not provided)
 
-    url = f"https://api.financialdatasets.ai/prices/?ticker={ticker}&interval=day&interval_multiplier=1&start_date={start_date}&end_date={end_date}"
-    response = _make_api_request(url, headers)
-    if response.status_code != 200:
-        return []
-
-    # Parse response with Pydantic model
-    try:
-        price_response = PriceResponse(**response.json())
-        prices = price_response.prices
-    except:
-        return []
-
-    if not prices:
-        return []
-
-    # Cache the results using the comprehensive cache key
-    _cache.set_prices(cache_key, [p.model_dump() for p in prices])
-    return prices
+    Returns:
+        List of Price objects with OHLCV data
+    """
+    return get_prices_av(ticker, start_date, end_date)
 
 
 def get_financial_metrics(
@@ -99,38 +48,19 @@ def get_financial_metrics(
     limit: int = 10,
     api_key: str = None,
 ) -> list[FinancialMetrics]:
-    """Fetch financial metrics from cache or API."""
-    # Create a cache key that includes all parameters to ensure exact matches
-    cache_key = f"{ticker}_{period}_{end_date}_{limit}"
-    
-    # Check cache first - simple exact match
-    if cached_data := _cache.get_financial_metrics(cache_key):
-        return [FinancialMetrics(**metric) for metric in cached_data]
+    """Fetch financial metrics from Alpha Vantage.
 
-    # If not in cache, fetch from API
-    headers = {}
-    financial_api_key = api_key or os.environ.get("FINANCIAL_DATASETS_API_KEY")
-    if financial_api_key:
-        headers["X-API-KEY"] = financial_api_key
+    Args:
+        ticker: Stock ticker symbol
+        end_date: End date for filtering reports (YYYY-MM-DD)
+        period: Report period type - "ttm", "quarterly", or "annual"
+        limit: Maximum number of periods to return
+        api_key: Optional API key (uses ALPHA_VANTAGE_API_KEY env var if not provided)
 
-    url = f"https://api.financialdatasets.ai/financial-metrics/?ticker={ticker}&report_period_lte={end_date}&limit={limit}&period={period}"
-    response = _make_api_request(url, headers)
-    if response.status_code != 200:
-        return []
-
-    # Parse response with Pydantic model
-    try:
-        metrics_response = FinancialMetricsResponse(**response.json())
-        financial_metrics = metrics_response.financial_metrics
-    except:
-        return []
-
-    if not financial_metrics:
-        return []
-
-    # Cache the results as dicts using the comprehensive cache key
-    _cache.set_financial_metrics(cache_key, [m.model_dump() for m in financial_metrics])
-    return financial_metrics
+    Returns:
+        List of FinancialMetrics objects with valuation ratios, margins, etc.
+    """
+    return get_financial_metrics_av(ticker, end_date, period, limit)
 
 
 def search_line_items(
@@ -141,37 +71,20 @@ def search_line_items(
     limit: int = 10,
     api_key: str = None,
 ) -> list[LineItem]:
-    """Fetch line items from API."""
-    # If not in cache or insufficient data, fetch from API
-    headers = {}
-    financial_api_key = api_key or os.environ.get("FINANCIAL_DATASETS_API_KEY")
-    if financial_api_key:
-        headers["X-API-KEY"] = financial_api_key
+    """Fetch specific financial statement line items from Alpha Vantage.
 
-    url = "https://api.financialdatasets.ai/financials/search/line-items"
+    Args:
+        ticker: Stock ticker symbol
+        line_items: List of line item names to fetch (e.g., ["revenue", "net_income"])
+        end_date: End date for filtering reports (YYYY-MM-DD)
+        period: Report period type - "ttm", "quarterly", or "annual"
+        limit: Maximum number of periods to return
+        api_key: Optional API key (uses ALPHA_VANTAGE_API_KEY env var if not provided)
 
-    body = {
-        "tickers": [ticker],
-        "line_items": line_items,
-        "end_date": end_date,
-        "period": period,
-        "limit": limit,
-    }
-    response = _make_api_request(url, headers, method="POST", json_data=body)
-    if response.status_code != 200:
-        return []
-    
-    try:
-        data = response.json()
-        response_model = LineItemResponse(**data)
-        search_results = response_model.search_results
-    except:
-        return []
-    if not search_results:
-        return []
-
-    # Cache the results
-    return search_results[:limit]
+    Returns:
+        List of LineItem objects with requested fields
+    """
+    return search_line_items_av(ticker, line_items, end_date, period, limit)
 
 
 def get_insider_trades(
@@ -181,62 +94,19 @@ def get_insider_trades(
     limit: int = 1000,
     api_key: str = None,
 ) -> list[InsiderTrade]:
-    """Fetch insider trades from cache or API."""
-    # Create a cache key that includes all parameters to ensure exact matches
-    cache_key = f"{ticker}_{start_date or 'none'}_{end_date}_{limit}"
-    
-    # Check cache first - simple exact match
-    if cached_data := _cache.get_insider_trades(cache_key):
-        return [InsiderTrade(**trade) for trade in cached_data]
+    """Fetch insider trades from SEC EDGAR Form 4 filings.
 
-    # If not in cache, fetch from API
-    headers = {}
-    financial_api_key = api_key or os.environ.get("FINANCIAL_DATASETS_API_KEY")
-    if financial_api_key:
-        headers["X-API-KEY"] = financial_api_key
+    Args:
+        ticker: Stock ticker symbol
+        end_date: End date for filtering trades (YYYY-MM-DD)
+        start_date: Optional start date for filtering trades (YYYY-MM-DD)
+        limit: Maximum number of trades to return
+        api_key: Not used (SEC EDGAR is free), kept for API compatibility
 
-    all_trades = []
-    current_end_date = end_date
-
-    while True:
-        url = f"https://api.financialdatasets.ai/insider-trades/?ticker={ticker}&filing_date_lte={current_end_date}"
-        if start_date:
-            url += f"&filing_date_gte={start_date}"
-        url += f"&limit={limit}"
-
-        response = _make_api_request(url, headers)
-        if response.status_code != 200:
-            break
-
-        try:
-            data = response.json()
-            response_model = InsiderTradeResponse(**data)
-            insider_trades = response_model.insider_trades
-        except:
-            break  # Parsing error, exit loop
-
-        if not insider_trades:
-            break
-
-        all_trades.extend(insider_trades)
-
-        # Only continue pagination if we have a start_date and got a full page
-        if not start_date or len(insider_trades) < limit:
-            break
-
-        # Update end_date to the oldest filing date from current batch for next iteration
-        current_end_date = min(trade.filing_date for trade in insider_trades).split("T")[0]
-
-        # If we've reached or passed the start_date, we can stop
-        if current_end_date <= start_date:
-            break
-
-    if not all_trades:
-        return []
-
-    # Cache the results using the comprehensive cache key
-    _cache.set_insider_trades(cache_key, [trade.model_dump() for trade in all_trades])
-    return all_trades
+    Returns:
+        List of InsiderTrade objects with transaction details
+    """
+    return get_insider_trades_sec(ticker, end_date, start_date, limit)
 
 
 def get_company_news(
@@ -246,62 +116,19 @@ def get_company_news(
     limit: int = 1000,
     api_key: str = None,
 ) -> list[CompanyNews]:
-    """Fetch company news from cache or API."""
-    # Create a cache key that includes all parameters to ensure exact matches
-    cache_key = f"{ticker}_{start_date or 'none'}_{end_date}_{limit}"
-    
-    # Check cache first - simple exact match
-    if cached_data := _cache.get_company_news(cache_key):
-        return [CompanyNews(**news) for news in cached_data]
+    """Fetch company news from Alpha Vantage NEWS_SENTIMENT endpoint.
 
-    # If not in cache, fetch from API
-    headers = {}
-    financial_api_key = api_key or os.environ.get("FINANCIAL_DATASETS_API_KEY")
-    if financial_api_key:
-        headers["X-API-KEY"] = financial_api_key
+    Args:
+        ticker: Stock ticker symbol
+        end_date: End date for filtering news (YYYY-MM-DD)
+        start_date: Optional start date for filtering news (YYYY-MM-DD)
+        limit: Maximum number of news items to return
+        api_key: Optional API key (uses ALPHA_VANTAGE_API_KEY env var if not provided)
 
-    all_news = []
-    current_end_date = end_date
-
-    while True:
-        url = f"https://api.financialdatasets.ai/news/?ticker={ticker}&end_date={current_end_date}"
-        if start_date:
-            url += f"&start_date={start_date}"
-        url += f"&limit={limit}"
-
-        response = _make_api_request(url, headers)
-        if response.status_code != 200:
-            break
-
-        try:
-            data = response.json()
-            response_model = CompanyNewsResponse(**data)
-            company_news = response_model.news
-        except:
-            break  # Parsing error, exit loop
-
-        if not company_news:
-            break
-
-        all_news.extend(company_news)
-
-        # Only continue pagination if we have a start_date and got a full page
-        if not start_date or len(company_news) < limit:
-            break
-
-        # Update end_date to the oldest date from current batch for next iteration
-        current_end_date = min(news.date for news in company_news).split("T")[0]
-
-        # If we've reached or passed the start_date, we can stop
-        if current_end_date <= start_date:
-            break
-
-    if not all_news:
-        return []
-
-    # Cache the results using the comprehensive cache key
-    _cache.set_company_news(cache_key, [news.model_dump() for news in all_news])
-    return all_news
+    Returns:
+        List of CompanyNews objects with title, date, sentiment, etc.
+    """
+    return get_company_news_av(ticker, end_date, start_date, limit)
 
 
 def get_market_cap(
@@ -309,50 +136,53 @@ def get_market_cap(
     end_date: str,
     api_key: str = None,
 ) -> float | None:
-    """Fetch market cap from the API."""
-    # Check if end_date is today
-    if end_date == datetime.datetime.now().strftime("%Y-%m-%d"):
-        # Get the market cap from company facts API
-        headers = {}
-        financial_api_key = api_key or os.environ.get("FINANCIAL_DATASETS_API_KEY")
-        if financial_api_key:
-            headers["X-API-KEY"] = financial_api_key
+    """Fetch market capitalization from Alpha Vantage.
 
-        url = f"https://api.financialdatasets.ai/company/facts/?ticker={ticker}"
-        response = _make_api_request(url, headers)
-        if response.status_code != 200:
-            print(f"Error fetching company facts: {ticker} - {response.status_code}")
-            return None
+    Args:
+        ticker: Stock ticker symbol
+        end_date: Date for market cap (uses current value from OVERVIEW)
+        api_key: Optional API key (uses ALPHA_VANTAGE_API_KEY env var if not provided)
 
-        data = response.json()
-        response_model = CompanyFactsResponse(**data)
-        return response_model.company_facts.market_cap
-
-    financial_metrics = get_financial_metrics(ticker, end_date, api_key=api_key)
-    if not financial_metrics:
-        return None
-
-    market_cap = financial_metrics[0].market_cap
-
-    if not market_cap:
-        return None
-
-    return market_cap
+    Returns:
+        Market capitalization as float, or None if unavailable
+    """
+    return get_market_cap_av(ticker, end_date)
 
 
 def prices_to_df(prices: list[Price]) -> pd.DataFrame:
-    """Convert prices to a DataFrame."""
+    """Convert prices to a DataFrame.
+
+    Args:
+        prices: List of Price objects
+
+    Returns:
+        DataFrame with Date index and OHLCV columns
+    """
+    if not prices:
+        return pd.DataFrame()
+
     df = pd.DataFrame([p.model_dump() for p in prices])
     df["Date"] = pd.to_datetime(df["time"])
     df.set_index("Date", inplace=True)
     numeric_cols = ["open", "close", "high", "low", "volume"]
     for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     df.sort_index(inplace=True)
     return df
 
 
-# Update the get_price_data function to use the new functions
 def get_price_data(ticker: str, start_date: str, end_date: str, api_key: str = None) -> pd.DataFrame:
+    """Fetch price data and return as DataFrame.
+
+    Args:
+        ticker: Stock ticker symbol
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        api_key: Optional API key (uses ALPHA_VANTAGE_API_KEY env var if not provided)
+
+    Returns:
+        DataFrame with Date index and OHLCV columns
+    """
     prices = get_prices(ticker, start_date, end_date, api_key=api_key)
     return prices_to_df(prices)

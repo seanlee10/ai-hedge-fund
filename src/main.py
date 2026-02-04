@@ -21,11 +21,11 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import json
 
+
 # Load environment variables from .env file
 load_dotenv()
 
 init(autoreset=True)
-
 
 def parse_hedge_fund_response(response):
     """Parses a JSON string and returns a dictionary."""

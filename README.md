@@ -74,13 +74,13 @@ Open and edit the `.env` file to add your API keys:
 # For running LLMs hosted by openai (gpt-4o, gpt-4o-mini, etc.)
 OPENAI_API_KEY=your-openai-api-key
 
-# For getting financial data to power the hedge fund
-FINANCIAL_DATASETS_API_KEY=your-financial-datasets-api-key
+# For getting financial data to power the hedge fund (Alpha Vantage)
+ALPHA_VANTAGE_API_KEY=your-alpha-vantage-api-key
 ```
 
-**Important**: You must set at least one LLM API key (e.g. `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`) for the hedge fund to work. 
+**Important**: You must set at least one LLM API key (e.g. `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`) for the hedge fund to work.
 
-**Financial Data**: Data for AAPL, GOOGL, MSFT, NVDA, and TSLA is free and does not require an API key. For any other ticker, you will need to set the `FINANCIAL_DATASETS_API_KEY` in the .env file.
+**Financial Data**: You will need an Alpha Vantage API key for financial data. Get one at https://www.alphavantage.co/support/#api-key. Premium tier ($50/mo) is recommended for better rate limits (75 calls/minute vs 5 for free tier). Insider trading data is fetched from SEC EDGAR (free, no API key required).
 
 ## How to Run
 
