@@ -76,6 +76,10 @@ OPENAI_API_KEY=your-openai-api-key
 
 # For getting financial data to power the hedge fund (Alpha Vantage)
 ALPHA_VANTAGE_API_KEY=your-alpha-vantage-api-key
+
+# For sending traces to arize, both can be found or created in Settings
+ARIZE_API_KEY=your-arize-api-key
+ARIZE_SPACE_ID=your-arize-space-id
 ```
 
 **Important**: You must set at least one LLM API key (e.g. `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`) for the hedge fund to work.
