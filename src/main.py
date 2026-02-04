@@ -27,6 +27,29 @@ load_dotenv()
 
 init(autoreset=True)
 
+
+from arize.otel import register, Transport
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# HOST = os.getenv("ARIZE_HOST")
+API_KEY = os.getenv("ARIZE_API_KEY")
+SPACE_ID = os.getenv("ARIZE_SPACE_ID")
+
+tracer_provider = register(
+    space_id = SPACE_ID,
+    api_key = API_KEY,
+    project_name = "ai-hedge-fund"
+)
+
+# Import the automatic instrumentor from OpenInference
+from openinference.instrumentation.langchain import LangChainInstrumentor
+
+# Finish automatic instrumentation
+LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+
 def parse_hedge_fund_response(response):
     """Parses a JSON string and returns a dictionary."""
     try:
